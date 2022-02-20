@@ -1,6 +1,8 @@
 /*
  * ip/config?token=flespi token here
+ * ip/config?topic_id=id here
  * 192.168.18.106/config?token=2o3ij4o23rjo2i3nro24nion42t3n4t
+ * 192.168.18.106/config?id=1001&restart=true
  * ip/update to udpate firmware
  */
 #include <NTPClient.h>
@@ -30,15 +32,13 @@ enum states
   on
 };
 
-bool enable_detection = 0;
+bool enable_detection = false;
 bool publish_status = false;
-const unsigned long REFRESH_INTERVAL1 = 1000; // 1sec
-const unsigned long REFRESH_INTERVAL2 = 8000; // 8sec
-unsigned long lastRefreshTime1 = 0;
-unsigned long lastRefreshTime2 = 0;
-unsigned long detect_time = 0, finish_time = 0, pause_time = 0;
+
+unsigned long  finish_time = 0, pause_time = 0;
 const char *mqtt_server = "mqtt.flespi.io";
-String mqtt_user_name = ""; //  "flespi token";
+char mqtt_topic_id[4];
+char mqtt_user_name[65]; //  "flespi token";
 int activate_light = 3;     // only 0 and 1 is recognized at the moment
 char status_buf[256];
 enum states light_state = off;
@@ -48,9 +48,9 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 5 * 3600, 60000);
 ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
-char pub_topic[] = "header/status";
-char sub_topic[] = "header/command";
-char will_topic[] = "header/will";
+char pub_topic[20] = "header/status/";
+char sub_topic[20] = "header/command/";
+char will_topic[20] = "header/will/";
 
 int getQuality()
 {
@@ -71,7 +71,7 @@ void generate_status_message()
   doc["wifi_quality"] = getQuality();
   doc["ip"] = WiFi.localIP().toString();
   doc["auto_mode"] = enable_detection;
-  doc["light_status"] = light_state;
+  doc["light_state"] = light_state;
   serializeJson(doc, status_buf);
 }
 void set_light(enum states new_state)
@@ -91,11 +91,13 @@ void set_light(enum states new_state)
   default:
     break;
   }
+  light_state=new_state;
   publish_status=true;
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
+  StaticJsonDocument<200> doc;
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
@@ -104,35 +106,42 @@ void callback(char *topic, byte *payload, unsigned int length)
     Serial.print((char)payload[i]);
   }
   Serial.println();
-
-  if (strncmp((char *)payload, "detected", length) == 0 && enable_detection == 1 && (millis() - pause_time) > 5000)
-  {
-    activate_light = 1;
+  DeserializationError error =deserializeJson(doc, payload, length);
+  if (error){
+    //publish some will
   }
-  else if (strncmp((char *)payload, "finished", length) == 0 && enable_detection == 1)
+  if(doc.containsKey("motion"))
   {
-    activate_light = 0;
-    finish_time = millis();
+    const char* key_val=doc["motion"];
+    if (strcmp(key_val, "detected") == 0 && enable_detection == true && (millis() - pause_time) > 5000)
+    {
+      activate_light = 1;
+    }
+    else if (strcmp(key_val, "finished") == 0 && enable_detection == true)
+    {
+      activate_light = 0;
+      finish_time = millis();
+    }
   }
-  else if (strncmp((char *)payload, "disable", length) == 0)
-  {
-    enable_detection = 0;
-    publish_status=true;
+  if(doc.containsKey("auto_mode"))
+  {    
+      enable_detection = doc["auto_mode"];
+      publish_status=true;
   }
-  else if (strncmp((char *)payload, "enable", length) == 0)
+  if(doc.containsKey("light_state"))
   {
-    enable_detection = 1; 
-    publish_status=true;
+    set_light((enum states)doc["light_state"]);
+    enable_detection = false;
   }
   else if (strncmp((char *)payload, "on", length) == 0)
   {
     set_light(on);
-    enable_detection = 0;
+    enable_detection = false;
   }
   else if (strncmp((char *)payload, "off", length) == 0)
   {
     set_light(off);
-    enable_detection = 0;
+    enable_detection = false;
   }
 }
 
@@ -146,9 +155,14 @@ void reconnect()
     // Create a random client ID
     String clientId = "CamLight-" + WiFi.macAddress();
     clientId += String(random(0xffff), HEX);
-    if (client.connect(clientId.c_str(), mqtt_user_name.c_str(), "", will_topic, 0, 0, last_will))
+    // Attempt to connect
+    // mqtt_user_name
+    if (client.connect(clientId.c_str(), mqtt_user_name, "", will_topic, 0, 0, last_will))
     {
       Serial.println("connected");
+      // Once connected, publish an announcement...
+      // client.publish(pub_topic, "powered-up");
+      // ... and resubscribe
       client.subscribe(sub_topic);
     }
     else
@@ -157,22 +171,41 @@ void reconnect()
     }
   }
 }
-void handleToken()
-{
-  String token = "";
-  if (httpServer.argName(0).equals("token"))
+void handleConfig()
+{  
+  for (uint8_t i = 0; i < httpServer.args(); i++)
   {
-    token += httpServer.arg(0);
-    fileSystem.saveToFile("/token.txt", token);
-    httpServer.send(200, "text/plain", "token saved successfully");
-    ESP.restart();
-  }
-  else
-  {
-    httpServer.send(200, "text/plain", "token not found");
-  }
+    if (httpServer.argName(i).equals("token"))
+    {
+      const char* newCharBuffer;
+      String token = "";
+      token += httpServer.arg(i);
+      fileSystem.saveToFile("/token.txt", token);
+      fileSystem.openFromFile("/token.txt", newCharBuffer);
+      strcpy(mqtt_user_name,newCharBuffer);
+      Serial.println(mqtt_user_name);
+      Serial.println(mqtt_topic_id);
+    }
+    if (httpServer.argName(i).equals("id"))
+    {
+      const char* newCharBuffer;
+      String topic_id = "";
+      topic_id += httpServer.arg(i);
+      fileSystem.saveToFile("/id.txt", topic_id);
+      fileSystem.openFromFile("/id.txt", newCharBuffer);
+      strcpy(mqtt_topic_id,newCharBuffer);
+      Serial.println(mqtt_user_name);
+      Serial.println(mqtt_topic_id);
+    }
+    if(httpServer.argName(i).equals("restart"))
+    {
+      client.disconnect();
+      httpServer.send(200, "text/plain", "id saved successfully");
+      ESP.restart();
+    }  
+  } 
+  httpServer.send(200, "text/plain", "New configuration will be applied after restart"); 
 }
-
 void handleNotFound()
 {
   String message = "File Not Found\n\n";
@@ -192,6 +225,7 @@ void handleNotFound()
 
 void setup()
 {
+  const char* newCharBuffer;
   pinMode(LIGHT_SWITCH, OUTPUT); // Initialize the pin as an output
   digitalWrite(LIGHT_SWITCH, LIGHT_OFF);
   WiFi.mode(WIFI_STA);
@@ -204,20 +238,32 @@ void setup()
   wifiManager.autoConnect("AutoConnectAP", "password");
   Serial.println("local ip");
   Serial.println(WiFi.localIP());
+  //  fileSystem.saveToFile("/CharBuffer.txt", newCharBuffer);
   timeClient.begin();
+  fileSystem.openFromFile("/token.txt", newCharBuffer);
+  strcpy(mqtt_user_name,newCharBuffer);
+  fileSystem.openFromFile("/id.txt", newCharBuffer);
+  strcpy(mqtt_topic_id,newCharBuffer);  
+  strcat(pub_topic,mqtt_topic_id);
+  strcat(sub_topic,mqtt_topic_id);
+  strcat(will_topic,mqtt_topic_id);
+  Serial.println(mqtt_user_name);
+  Serial.println(mqtt_topic_id);
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
   httpUpdater.setup(&httpServer);
-  httpServer.on("/config", handleToken);
+  httpServer.on("/config", handleConfig);
   httpServer.onNotFound(handleNotFound);
-  httpServer.begin();
-  fileSystem.openFromFile("/token.txt", mqtt_user_name);
-  Serial.println(mqtt_user_name);
+  httpServer.begin();  
   publish_status=true;
 }
 
 void loop()
 {
+  const unsigned long REFRESH_INTERVAL1 = 1000; // 1sec
+  const unsigned long REFRESH_INTERVAL2 = 8000; // 8sec
+  static unsigned long lastRefreshTime1 = 0;
+  static unsigned long lastRefreshTime2 = 0;
   if (millis() - lastRefreshTime1 >= REFRESH_INTERVAL1)
   {
     if (!client.connected())
