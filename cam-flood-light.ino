@@ -6,8 +6,6 @@
  * ip/update to udpate firmware
  */
 
-// https://github.com/knolleary/pubsubclient/issues/403#issuecomment-432098156
-
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <ESP8266WiFi.h>
@@ -15,6 +13,8 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
 #include <WiFiManager.h>
 #include <Effortless_SPIFFS.h>
 #include <ArduinoJson.h>
@@ -22,6 +22,7 @@
 #include <TimeAlarms.h>
 eSPIFFS fileSystem;
 
+#define VERSION 10
 #define TEST_BUILD 1
 // Update these with values suitable for your network.
 #ifdef TEST_BUILD
@@ -56,6 +57,9 @@ const char *mqtt_server = "mqtt.flespi.io";
 char mqtt_topic_id[4] = {0};
 char mqtt_user_name[65] = {0}; //  "flespi token";
 char device_alias[30] = {0};
+int device_group=99;
+int motion_finish_off_pause=5000;
+int motion_finish_on_pause=8000;
 int activate_light = 3; // only 0 and 1 is recognized at the moment
 char tx_buf[512] = {0};
 DynamicJsonDocument doc(1024);
@@ -68,6 +72,11 @@ ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
 char pub_topic[20] = "header/status/";
 char sub_topic[20] = "header/command/";
+
+void fw_update(char *url);
+int getQuality();
+void generate_status_message();
+void generate_will_message();
 
 int getQuality()
 {
@@ -93,6 +102,10 @@ void generate_status_message()
   doc["online"] = 1;
   doc["alias"] = device_alias;
   doc["auto_mode"] = auto_mode;
+  doc["fw_version"]=VERSION;
+  doc["on_pause"]=motion_finish_on_pause/1000;
+  doc["off_pause"]=motion_finish_off_pause/1000;
+  
   JsonArray auto_mode_time = doc.createNestedArray("auto_mode_time");
   auto_mode_time.add(auto_st_time.hours);
   auto_mode_time.add(auto_st_time.minutes);
@@ -102,7 +115,7 @@ void generate_status_message()
 }
 void generate_will_message()
 {
-  StaticJsonDocument<256> staticdoc;
+  StaticJsonDocument<100> staticdoc;
   staticdoc["ident"] = WiFi.macAddress();
   staticdoc["online"] = 0;
   serializeJson(staticdoc, tx_buf);
@@ -166,7 +179,7 @@ void mode_set()
 }
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  StaticJsonDocument<256> staticdoc;
+  StaticJsonDocument<100> staticdoc;
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
@@ -185,7 +198,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   if (staticdoc.containsKey("motion"))
   {
     const char *key_val = staticdoc["motion"];
-    if (strcmp(key_val, "detected") == 0 && enable_detection == true && (millis() - pause_time) > 8000)
+    if (strcmp(key_val, "detected") == 0 && enable_detection == true && (millis() - pause_time) > motion_finish_off_pause)
     {
       activate_light = 1;
     }
@@ -198,8 +211,7 @@ void callback(char *topic, byte *payload, unsigned int length)
   if (staticdoc.containsKey("auto_mode"))
   {
     auto_mode=staticdoc["auto_mode"]; 
-    activate_light = 0;
-    enable_detection=false;        
+    activate_light = 0;       
     mode_set();   
     publish_status = true;
   }
@@ -221,11 +233,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     auto_en_time.seconds = 0;
     fileSystem.saveToFile("/json.txt", cmd_payload);
     publish_status = true;
-  }
-  if (staticdoc.containsKey("ping"))
-  {
-    publish_status = true;
-  }
+  }  
   if (staticdoc.containsKey("light_state"))
   {
     set_light((enum states)staticdoc["light_state"]);
@@ -234,8 +242,98 @@ void callback(char *topic, byte *payload, unsigned int length)
     mode_set();
     publish_status = true;
   }
+  if (staticdoc.containsKey("ota_url") && staticdoc.containsKey("group") && staticdoc.containsKey("fw_version"))
+  {
+    int ota_group=staticdoc["group"];
+    int fw_version=staticdoc["fw_version"];
+    if(ota_group==device_group && fw_version!=VERSION)
+    {
+     const char* ota_url= staticdoc["ota_url"];
+     fw_update(ota_url);
+    }
+  }
+  else if(staticdoc.containsKey("ota_url"))//if only ota url received,
+  {
+    const char* ota_url= staticdoc["ota_url"];
+    fw_update(ota_url);
+  } 
+  if(staticdoc.containsKey("off_pause"))//if only ota url received,
+  {
+    motion_finish_off_pause = staticdoc["off_pause"];  
+    motion_finish_off_pause*=1000;
+    publish_status = true;  
+  }
+   if(staticdoc.containsKey("on_pause"))//if only ota url received,
+  {
+    motion_finish_on_pause = staticdoc["on_pause"];  
+    motion_finish_on_pause*=1000;
+    publish_status = true;  
+  }
+  if (staticdoc.containsKey("ping"))
+  {
+    publish_status = true;
+  }
 }
 
+void update_started() {
+  Serial.println("CALLBACK:  HTTP update process started");
+}
+
+void update_finished() {
+  Serial.println("CALLBACK:  HTTP update process finished");
+  esp_restart=true;
+}
+
+void update_progress(int cur, int total) {
+  static bool flip_flop=false;
+  int ota_progress=(cur/(float)total)*100.0;
+  flip_flop=!flip_flop;
+  if(flip_flop || ota_progress == 100)
+  {    
+    StaticJsonDocument<100> staticdoc;  
+    staticdoc["ident"] = WiFi.macAddress();
+    staticdoc["ota_progress"] = ota_progress;
+    serializeJson(staticdoc, tx_buf);
+    client.publish(pub_topic, tx_buf, 0);  
+  }
+  client.loop();  
+  Serial.printf("CALLBACK:  HTTP update process at %d of %d bytes...\n", cur, total);
+}
+
+void update_error(int err) {
+  Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
+}
+void fw_update(const char *url)
+{
+  WiFiClient client;
+  ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+  ESPhttpUpdate.rebootOnUpdate(false);
+  ESPhttpUpdate.closeConnectionsOnUpdate(false);
+  // Add optional callback notifiers
+  ESPhttpUpdate.onStart(update_started);
+  ESPhttpUpdate.onEnd(update_finished);
+  ESPhttpUpdate.onProgress(update_progress);
+  ESPhttpUpdate.onError(update_error);
+
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
+  // Or:
+  //t_httpUpdate_return ret = ESPhttpUpdate.update(client, "server", 80, "file.bin");
+
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+      break;
+
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("HTTP_UPDATE_NO_UPDATES");
+      break;
+
+    case HTTP_UPDATE_OK:
+      Serial.println("HTTP_UPDATE_OK");
+      break;
+  }
+
+}
 void reconnect()
 {
   // Loop until we're reconnected
@@ -252,6 +350,7 @@ void reconnect()
     {
       Serial.println("connected");
       client.subscribe(sub_topic);
+      client.subscribe("header/command/global_cmd");
     }
     else
     {
@@ -279,6 +378,11 @@ void handleConfig()
       topic_id += httpServer.arg(i);
       fileSystem.saveToFile("/id.txt", topic_id);
       strcpy(mqtt_topic_id, httpServer.arg(i).c_str());
+    }
+    if (httpServer.argName(i).equals("Group"))
+    {
+      device_group = httpServer.arg(i).toInt();
+      fileSystem.saveToFile("/group.txt", device_group);
     }
     if (httpServer.argName(i).equals("alias"))
     {
@@ -313,6 +417,7 @@ void update_from_memory()
 {
   char mem_buf[512];
   const char *newCharBuffer;
+  fileSystem.openFromFile("/group.txt", device_group);
   if (fileSystem.openFromFile("/token.txt", newCharBuffer))
     strcpy(mqtt_user_name, newCharBuffer);
   if (fileSystem.openFromFile("/id.txt", newCharBuffer))
@@ -354,6 +459,7 @@ void update_from_memory()
   // strcat(will_topic,mqtt_topic_id);
   Serial.println(mqtt_user_name);
   Serial.println(mqtt_topic_id);
+  Serial.println(device_group);
 }
 void setup()
 {
@@ -389,8 +495,7 @@ void send_device_status()
 }
 void loop()
 {  
-  const unsigned long REFRESH_INTERVAL2 = 8000; // 8sec
-  if (activate_light == 0 && (millis() - finish_time >= REFRESH_INTERVAL2))
+  if (activate_light == 0 && (millis() - finish_time >= motion_finish_on_pause))
   {
     pause_time = millis();
     set_light(off);
