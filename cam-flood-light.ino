@@ -22,8 +22,8 @@
 #include <TimeAlarms.h>
 eSPIFFS fileSystem;
 
-#define VERSION 10
-#define TEST_BUILD 1
+#define VERSION 11
+//#define TEST_BUILD 1
 // Update these with values suitable for your network.
 #ifdef TEST_BUILD
 #define LIGHT_ON 0
@@ -59,7 +59,7 @@ char mqtt_user_name[65] = {0}; //  "flespi token";
 char device_alias[30] = {0};
 int device_group=99;
 int motion_finish_off_pause=5000;
-int motion_finish_on_pause=8000;
+int motion_finish_on_pause=20000;
 int activate_light = 3; // only 0 and 1 is recognized at the moment
 char tx_buf[512] = {0};
 DynamicJsonDocument doc(1024);
@@ -103,6 +103,7 @@ void generate_status_message()
   doc["alias"] = device_alias;
   doc["auto_mode"] = auto_mode;
   doc["fw_version"]=VERSION;
+  doc["device_group"]=device_group;
   doc["on_pause"]=motion_finish_on_pause/1000;
   doc["off_pause"]=motion_finish_off_pause/1000;
   
@@ -208,6 +209,12 @@ void callback(char *topic, byte *payload, unsigned int length)
       finish_time = millis();
     }
   }
+  if(staticdoc.containsKey("device_group"))
+  {
+    int group=staticdoc["device_group"];    
+    if(group!=device_group)
+    return;
+  }
   if (staticdoc.containsKey("auto_mode"))
   {
     auto_mode=staticdoc["auto_mode"]; 
@@ -242,18 +249,14 @@ void callback(char *topic, byte *payload, unsigned int length)
     mode_set();
     publish_status = true;
   }
-  if (staticdoc.containsKey("ota_url") && staticdoc.containsKey("group") && staticdoc.containsKey("fw_version"))
-  {
-    int ota_group=staticdoc["group"];
-    int fw_version=staticdoc["fw_version"];
-    if(ota_group==device_group && fw_version!=VERSION)
-    {
-     const char* ota_url= staticdoc["ota_url"];
-     fw_update(ota_url);
-    }
-  }
   else if(staticdoc.containsKey("ota_url"))//if only ota url received,
   {
+    if(staticdoc.containsKey("fw_version"))
+    {
+      int fw_version=staticdoc["fw_version"];
+      if( fw_version==VERSION)//already on same version
+        return;
+    }
     const char* ota_url= staticdoc["ota_url"];
     fw_update(ota_url);
   } 
@@ -379,10 +382,10 @@ void handleConfig()
       fileSystem.saveToFile("/id.txt", topic_id);
       strcpy(mqtt_topic_id, httpServer.arg(i).c_str());
     }
-    if (httpServer.argName(i).equals("Group"))
+    if (httpServer.argName(i).equals("device_group"))
     {
       device_group = httpServer.arg(i).toInt();
-      fileSystem.saveToFile("/group.txt", device_group);
+      fileSystem.saveToFile("/device_group.txt", device_group);
     }
     if (httpServer.argName(i).equals("alias"))
     {
@@ -417,7 +420,7 @@ void update_from_memory()
 {
   char mem_buf[512];
   const char *newCharBuffer;
-  fileSystem.openFromFile("/group.txt", device_group);
+  fileSystem.openFromFile("/device_group.txt", device_group);
   if (fileSystem.openFromFile("/token.txt", newCharBuffer))
     strcpy(mqtt_user_name, newCharBuffer);
   if (fileSystem.openFromFile("/id.txt", newCharBuffer))
