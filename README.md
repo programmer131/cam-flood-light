@@ -1,13 +1,13 @@
 # cam-flood-light
-ispy sends mqtt message when there is motion detection, esp8266 triggers flood light, Chinese v380 cam attached 
+Chinese v380 cam in use, can be any, ispy sends mqtt message when there is motion detection, esp8266 triggers flood light,  
 
-#### to start deepstack on port 8000
+#### To start deepstack on port 8000
 docker run -e VISION-DETECTION=True -v localstorage:/datastore -p 8000:5000 deepquestai/deepstack
 
 #### ispy messages
-topic: header/command/0002
-{"ident":"ispy-agent-0002","motion": "detected"}
-{"ident":"ispy-agent-0002","motion": "finished"}
+topic: header/command/0002  
+{"ident":"ispy-agent-0002","motion": "detected"}  
+{"ident":"ispy-agent-0002","motion": "finished"}  
 
 #### MQTT Test commands
 
