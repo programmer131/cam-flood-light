@@ -9,7 +9,18 @@ topic: header/command/0002
 {"ident":"ispy-agent-0002","motion": "detected"}  
 {"ident":"ispy-agent-0002","motion": "finished"}  
 
+
 #### MQTT Test commands
+
+{ 
+"ident" : "flespi-board", 
+"ota_url":"http://myiotota.000webhostapp.com/v9.bin" 
+} 
+
+{ 
+"ident" : "flespi-board", 
+"ota_url":"http://192.168.18.24:2222/flood-light.ino.d1_mini.bin" 
+} 
 
 {
   "auto_mode": true
