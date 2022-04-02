@@ -14,15 +14,20 @@ Chinese v380 cam in use, can be any, ispy sends mqtt message when there is motio
 * Verify from some mqtt client if agent able to push mqtt messages on motion detection
 * Setup hardware to receive mqtt messages and turn on/off light
 
-#### To start deepstack on port 8000
-docker run -e VISION-DETECTION=True -v localstorage:/datastore -p 8000:5000 deepquestai/deepstack
+**To start deepstack on port 8000** 
+
+```docker run -e VISION-DETECTION=True -v localstorage:/datastore -p 8000:5000 deepquestai/deepstack``` 
 
 #### ispy messages
-topic: header/command/0002  
-{"ident":"ispy-agent-0002","motion": "detected"}  
-{"ident":"ispy-agent-0002","motion": "finished"}  
+**topic** header/command/0002  
+**payload** {"ident":"ispy-agent-0002","motion": "detected"}  
+**payload** {"ident":"ispy-agent-0002","motion": "finished"} 
 
+**mqtt status topic** 
+header/statue/device_id 
 
+**mqtt command topic** 
+header/command/device_id 
 #### MQTT Test commands
 
 { 
@@ -58,3 +63,38 @@ topic: header/command/0002
 {
   "light_state": 1
 }
+
+{ 
+"auto_mode_time":[18,10,6,10] 
+} 
+
+{ 
+"ping":1 
+} 
+#### status message from device 
+```
+{
+   "ident":"58:BF:25:DC:5B:53",
+   "ssid":"TP-LINK_C1CA",
+   "wifi_quality":54,
+   "ip":"192.168.0.103",
+   "obj_detection":false,
+   "light_state":0,
+   "dev_time":"21:59:12",
+   "online":1,
+   "alias":"esp01-cam-light",
+   "auto_mode":false,
+   "fw_version":12,
+   "device_group":99,
+   "on_pause":20,
+   "off_pause":5,
+   "auto_mode_time":[
+      18,
+      40,
+      5,
+      20
+   ]
+} 
+``` 
+#### mqtt dashboard screenshot
+![image](https://user-images.githubusercontent.com/12946496/161364333-2fbdeb47-92de-4f33-afff-e35535ab31a7.png)
