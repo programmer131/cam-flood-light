@@ -3,7 +3,7 @@ Chinese v380 cam in use, can be any, ispy sends mqtt message when there is motio
 
 ### setup guide
 * Download and install agent DVR https://www.ispyconnect.com/download.aspx
-* Download and install https://www.deepstack.cc/
+* Download and install Deepstack AI https://www.deepstack.cc/
 * follow guide to setup deepstack www.ispyconnect.com/userguide-agent-deepstack-ai.aspx
 * Start agent, optionally add service to auto start after system power up/reboots
 * From settings, Configure camera, mqtt server, ftp if any
