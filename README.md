@@ -18,6 +18,13 @@ Chinese v380 cam in use, can be any, ispy sends mqtt message when there is motio
 
 ```docker run -e VISION-DETECTION=True -v localstorage:/datastore -p 8000:5000 deepquestai/deepstack``` 
 
+**Deepstack dark model**
+Follow the guide https://forum.deepstack.cc/t/deepstack-exdark-detect-objects-in-dark-night-images-and-videos/934 
+
+To copy model from local filesystem to docker (one time process), then stop and start docker with same above command 
+
+```sudo docker cp /home/models 92e57955f907:/datastore/```
+
 #### ispy messages
 **topic** header/command/0002  
 **payload** {"ident":"ispy-agent-0002","motion": "detected"}  
