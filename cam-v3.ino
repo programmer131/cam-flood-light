@@ -28,7 +28,7 @@ eSPIFFS fileSystem;
 const char* ssid     = STASSID;
 const char* password = STAPSK;
 
-#define VERSION 17
+#define VERSION 20
 // Update these with values suitable for your board
 #define ESP_01
 //#define WEMOS_D1_MINI_PROD
@@ -95,8 +95,8 @@ void generate_will_message();
 
 void update_auto_mode_minutes()
 {
-  auto_start_min=auto_st_time.hours+auto_st_time.minutes;
-  auto_end_min=auto_en_time.hours+auto_en_time.minutes;
+  auto_start_min=60*auto_st_time.hours+auto_st_time.minutes;
+  auto_end_min=60*auto_en_time.hours+auto_en_time.minutes-30;
 }
 void get_sunrise_sunset_time(void)
 {
@@ -280,6 +280,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     if(auto_mode)
     {
       update_auto_mode_minutes();
+      auto_mode_time_check();
     }
   }
   if (staticdoc.containsKey("obj_detection"))
@@ -441,15 +442,23 @@ void auto_mode_time_check()
   if(!auto_mode)
     return;
   unsigned int current_time_minutes=timeClient.getHours()*60+timeClient.getMinutes();
+  /*Serial.print("current time: min ");
+  Serial.println(current_time_minutes);
+  Serial.print("auto_start_min time: min ");
+  Serial.println(auto_start_min);
+  Serial.print("auto_end_min time: min ");
+  Serial.println(auto_end_min);
+  */
   if(current_time_minutes>auto_start_min || current_time_minutes<auto_end_min)//auto_start_min,auto_end_min;
-  {
+  {    
     enable_detection=1;
   }
   else
   {
     enable_detection=0;
   }
-
+  Serial.print("detection:");
+  Serial.println(enable_detection);
 }
 void runPeriodicFunc()
 {
@@ -474,6 +483,10 @@ void runPeriodicFunc()
     }
     if(currentSec - prevSec3 >= REFRESH_INTERVAL3)
     {   
+      if(auto_st_time.hours == 0 && auto_en_time.hours ==0)
+      {
+        get_sunrise_sunset_time();         
+      }
       auto_mode_time_check();
       prevSec3=currentSec;       
     }
