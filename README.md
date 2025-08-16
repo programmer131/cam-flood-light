@@ -18,6 +18,10 @@ Chinese v380 cam in use, can be any, ispy sends mqtt message when there is motio
 
 ```docker run --restart=always -e VISION-DETECTION=True -v localstorage:/datastore -p 8000:5000 deepquestai/deepstack``` 
 
+**To start senseAi on port 5000** 
+
+```docker run --restart=always -p 5000:5000 --name CodeProject.AI-Server -d -v /usr/share/CodeProject/AI:/usr/share/CodeProject/AI codeproject/ai-server```
+
 **Deepstack dark model**
 Follow the guide https://forum.deepstack.cc/t/deepstack-exdark-detect-objects-in-dark-night-images-and-videos/934 
 
