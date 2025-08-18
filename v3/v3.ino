@@ -28,7 +28,7 @@ eSPIFFS fileSystem;
 const char* ssid     = STASSID;
 const char* password = STAPSK;
 
-#define VERSION 20
+#define VERSION 27
 // Update these with values suitable for your board
 #define ESP_01
 //#define WEMOS_D1_MINI_PROD
@@ -65,15 +65,15 @@ unsigned int auto_start_min,auto_end_min;
 bool enable_detection = false;
 bool publish_status = false;
 bool esp_restart = false;
-bool auto_mode = false;
+bool auto_mode = 1;
 
 unsigned int finish_time = 0, pause_time = 0;
-const char *mqtt_server = "mqtt.flespi.io";
+const char *mqtt_server = "192.168.1.107";
 char mqtt_topic_id[4] = {0};
 char mqtt_user_name[65] = {0}; //  "flespi token";
 char device_alias[30] = {0};
 int device_group=99;
-unsigned int motion_finish_off_pause=5;
+unsigned int motion_finish_off_pause=8;
 unsigned int motion_finish_on_pause=20;
 int activate_light = 3; // only 0 and 1 is recognized at the moment
 char tx_buf[512] = {0};
@@ -93,10 +93,21 @@ void fw_update(char *url);
 void generate_status_message();
 void generate_will_message();
 
+int getQuality()
+{
+  if (WiFi.status() != WL_CONNECTED)
+    return -1;
+  int dBm = WiFi.RSSI();
+  if (dBm <= -100)
+    return 0;
+  if (dBm >= -50)
+    return 100;
+  return 2 * (dBm + 100);
+}
 void update_auto_mode_minutes()
 {
-  auto_start_min=60*auto_st_time.hours+auto_st_time.minutes;
-  auto_end_min=60*auto_en_time.hours+auto_en_time.minutes-30;
+  auto_start_min=60*auto_st_time.hours+auto_st_time.minutes+10;
+  auto_end_min=60*auto_en_time.hours+auto_en_time.minutes;
 }
 void get_sunrise_sunset_time(void)
 {
@@ -170,6 +181,7 @@ void generate_status_message()
   doc.clear();
   doc["ident"] = WiFi.macAddress();
   doc["ssid"] = WiFi.SSID();
+  doc["wifi_quality"] = getQuality();
   doc["ip"] = WiFi.localIP().toString();
   doc["city"]=location_city;
   doc["obj_detection"] = enable_detection;
@@ -260,7 +272,7 @@ void callback(char *topic, byte *payload, unsigned int length)
     {
       activate_light = 1;
     }
-    else if (strcmp(key_val, "finished") == 0 && enable_detection == true)
+    else if ((strcmp(key_val, "finished") == 0 )||(light_state==on && auto_mode))
     {
       activate_light = 0;
       finish_time = currentSec;
@@ -340,12 +352,24 @@ void fw_update(const char *url)
  WiFiClient client;
  ESPhttpUpdate.update(client, url);
 }
+unsigned long previousMillis_wifi = 0;
+unsigned long interval_wifi = 30000;
 void reconnect()
 {
   // Loop until we're reconnected
   if (!client.connected())
   {
-    Serial.println("Attempting MQTT connection...");
+    unsigned long currentMillis = millis();
+    // if WiFi is down, try reconnecting
+    if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis_wifi >=interval_wifi)) {
+      Serial.print(millis());
+      //Serial.println("Reconnecting to WiFi...");
+      WiFi.disconnect();
+      WiFi.begin(ssid, password);
+      delay(500);
+      previousMillis_wifi = currentMillis;
+    }
+    //Serial.println("Attempting MQTT connection...");
     generate_will_message();
     // Create a random client ID
     String clientId = "CamLight-" + WiFi.macAddress();
@@ -513,10 +537,10 @@ void setup()
   }
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(10);
+    delay(100);
   }
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
+  
+  //WiFi.setAutoReconnect(true);
   timeClient.begin();
   Serial.println("local ip");
   Serial.println(WiFi.localIP());    
@@ -524,7 +548,7 @@ void setup()
   
   update_from_memory();
   client.setBufferSize(512);
-  client.setServer(mqtt_server, 1883);
+  client.setServer(mqtt_server, 1886);
   client.setCallback(callback);
   httpServer.on("/config", handleConfig);
   httpServer.begin();  
